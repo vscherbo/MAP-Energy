@@ -186,6 +186,8 @@ class MAP:
             self.mdata._Status_Char = c_ubyte(ord(self.buf[0x402 - 0x3FF]))
             self.mdata._Uacc = ord(self.buf[0x405 - 0x3FF])*256 + ord(self.buf[0x406 - 0x3FF])
             self.mdata._Uacc /= 10
+            loc_uacc = self.mdata._Uacc
+            self.mdata._Uacc = round(loc_uacc, 1)
             self.mdata._PLoad = c_uint(ord(self.buf[0x409 - 0x3FF]) * 100)
             self.mdata._F_Acc_Over = c_ubyte(ord(self.buf[0x41C - 0x3FF]))
             self.mdata._F_Net_Over = c_ubyte(ord(self.buf[0x41D - 0x3FF]))
@@ -210,10 +212,11 @@ class MAP:
             self.mdata._Temp_Grad0 = c_ubyte(ord(self.buf[0x2F]) - 50)
             self.mdata._Temp_Grad2 = c_ubyte(ord(self.buf[0x430 - 0x3FF]) - 50)
             if self.mdata._INET < 16:
-                self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 16.0);
+                self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 16.0)
             else:
-                self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 4.0);
-            self.mdata._IAcc_med_A_u16 = c_float(float( ord(self.buf[0x34])*16 + ord(self.buf[0x35])) / 16.0);
+                self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 4.0)
+            self.mdata._INET_16_4 = round(self.mdata._INET_16_4, 1)
+            self.mdata._IAcc_med_A_u16 = c_float(round(float( ord(self.buf[0x34])*16 + ord(self.buf[0x35])) / 16.0, 1))
             self.mdata._Temp_off = c_ubyte(ord(self.buf[0x43C - 0x3FF]))
             self.mdata._E_NET = c_ulong(ord(self.buf[0x50])*65536 + ord(self.buf[0x4F])*256 + ord(self.buf[0x4E]))
             self.mdata._E_ACC = c_ulong(ord(self.buf[0x53])*65536 + ord(self.buf[0x52])*256 + ord(self.buf[0x51]))
@@ -226,17 +229,20 @@ class MAP:
             return False
         return True
     def save_data_to_db(self):
-        self.mdict = {'date': datetime.now().date(), 'time': datetime.now().time()}
-        self.mdict.update(dict(self.mdata._fields_))
+        self.mdict = {'date': str(datetime.now().date()), 'time': str(datetime.now().time())}
+        self.mdict.update({name: round(getattr(self.mdata, name),1) for name, dtype in self.mdata._fields_})
         print "self.mdict=", self.mdict 
+
+
         with self.connection.cursor() as cursor:
             placeholders = ', '.join(['%s'] * len(self.mdict))
             columns = ', '.join(self.mdict.keys())
             sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % ('data', columns, placeholders)
-            # cursor.execute(sql, self.mdict.values())
-            print "columns=", columns
-            print "values=", self.mdict.values()
-
+            cursor.execute(sql, self.mdict.values())
+            #print "columns=", columns
+            #print "values=", self.mdict.values()
+            # print "sql=", sql, self.mdict.values()
+        self.connection.commit()
 
 if __name__ == '__main__':
     mapups = MAP('/dev/ttyUSB0', baudrate=19200, timeout=5)
