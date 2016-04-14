@@ -5,7 +5,8 @@ import serial
 from ctypes import *
 from time import sleep
 from datetime import datetime
-import copy
+import pymysql.cursors
+
 
 maplib = cdll.LoadLibrary("libmapd_lib_dyn.so")
 
@@ -47,7 +48,9 @@ class MAPdata(Structure):
  ('_I_mppt_avg', c_float),
  ('_I2C_err', c_ubyte) ]
     def __repr__(self):
-        return """<MAPdata: 
+       loc_tfnet = "division by zero" if (0 == self._TFNET) else str(6250/self._TFNET)
+       loc_thfmap = "division by zero" if (0 == self._ThFMAP) else str(6250/self._ThFMAP)
+       return """<MAPdata: 
 _MODE = %d
 _Status_Char = %d
 _Uacc = %f
@@ -58,8 +61,8 @@ _F_Net_Over = %d
 _UNET = %d
 _INET = %d
 _PNET = %d
-_TFNET = %d
-_ThFMAP = %d
+_TFNET = %s
+_ThFMAP = %s
 _UOUTmed = %d
 _TFNET_Limit = %d
 _UNET_Limit = %d
@@ -89,8 +92,10 @@ _I2C_err = %d
 , self._UNET
 , self._INET
 , self._PNET
-, 6250/self._TFNET
-, 6250/self._ThFMAP
+#, 6250/self._TFNET
+#, 6250/self._ThFMAP
+, loc_tfnet
+, loc_thfmap
 , self._UOUTmed
 , self._TFNET_Limit
 , self._UNET_Limit
@@ -128,6 +133,17 @@ class MAP:
     def __init__(self, port_name, baudrate, timeout):
         self.port = serial.Serial(port_name, baudrate=baudrate, timeout=timeout)
         self.fd = self.port.fileno()
+    def open_db(self, host, user, password, db):
+        self.dbhost = host
+        self.dbuser = user
+        self.dbpw = password
+        self.db = db
+        self.connection = pymysql.connect(host = self.dbhost,
+                                     user = self.dbuser,
+                                     password = self.dbpw,
+                                     db = self.db,
+                                     charset='utf8',
+                                     cursorclass=pymysql.cursors.DictCursor)
     def send_command(self, command, addr, page):
         self.t_start = datetime.now()
         print 'start send_command=', self.t_start
@@ -209,10 +225,23 @@ class MAP:
             print "rc_read_data=", self.rc
             return False
         return True
+    def save_data_to_db(self):
+        self.mdict = {'date': datetime.now().date(), 'time': datetime.now().time()}
+        self.mdict.update(dict(self.mdata._fields_))
+        print "self.mdict=", self.mdict 
+        with self.connection.cursor() as cursor:
+            placeholders = ', '.join(['%s'] * len(self.mdict))
+            columns = ', '.join(self.mdict.keys())
+            sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % ('data', columns, placeholders)
+            # cursor.execute(sql, self.mdict.values())
+            print "columns=", columns
+            print "values=", self.mdict.values()
+
 
 if __name__ == '__main__':
     mapups = MAP('/dev/ttyUSB0', baudrate=19200, timeout=5)
     print "MAP created"
+    mapups.open_db('ct-mail', 'monitor', 'energy', 'upsmap')
     # print "port=", mapups.port
     # print "sizeof(mapups.mdata)=", sizeof(mapups.mdata)
 
@@ -230,5 +259,9 @@ if __name__ == '__main__':
 
     if mapups.read_data():
         print "mapups.mdata=", repr(mapups.mdata)
+        print "type(_fields_)=", type(mapups.mdata._fields_)
+        print "type(_fields_[0])=", type(mapups.mdata._fields_[0])
+        print "len(_fields_)=", len(mapups.mdata._fields_)
+        mapups.save_data_to_db()
     else:    
         print "Error read_data()"
