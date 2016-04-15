@@ -133,6 +133,11 @@ class MAP:
     def __init__(self, port_name, baudrate, timeout):
         self.port = serial.Serial(port_name, baudrate=baudrate, timeout=timeout)
         self.fd = self.port.fileno()
+    def __del__(self):
+        self.connection.commit()
+        self.connection.close()
+        self.port.flush()
+        self.port.close()
     def open_db(self, host, user, password, db):
         self.dbhost = host
         self.dbuser = user
@@ -186,8 +191,6 @@ class MAP:
             self.mdata._Status_Char = c_ubyte(ord(self.buf[0x402 - 0x3FF]))
             self.mdata._Uacc = ord(self.buf[0x405 - 0x3FF])*256 + ord(self.buf[0x406 - 0x3FF])
             self.mdata._Uacc /= 10
-            loc_uacc = self.mdata._Uacc
-            self.mdata._Uacc = round(loc_uacc, 1)
             self.mdata._PLoad = c_uint(ord(self.buf[0x409 - 0x3FF]) * 100)
             self.mdata._F_Acc_Over = c_ubyte(ord(self.buf[0x41C - 0x3FF]))
             self.mdata._F_Net_Over = c_ubyte(ord(self.buf[0x41D - 0x3FF]))
@@ -215,8 +218,7 @@ class MAP:
                 self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 16.0)
             else:
                 self.mdata._INET_16_4 = c_float(float(ord(self.buf[0x32])) / 4.0)
-            self.mdata._INET_16_4 = round(self.mdata._INET_16_4, 1)
-            self.mdata._IAcc_med_A_u16 = c_float(round(float( ord(self.buf[0x34])*16 + ord(self.buf[0x35])) / 16.0, 1))
+            self.mdata._IAcc_med_A_u16 = c_float(float( ord(self.buf[0x34])*16 + ord(self.buf[0x35])) / 16.0)
             self.mdata._Temp_off = c_ubyte(ord(self.buf[0x43C - 0x3FF]))
             self.mdata._E_NET = c_ulong(ord(self.buf[0x50])*65536 + ord(self.buf[0x4F])*256 + ord(self.buf[0x4E]))
             self.mdata._E_ACC = c_ulong(ord(self.buf[0x53])*65536 + ord(self.buf[0x52])*256 + ord(self.buf[0x51]))
@@ -233,16 +235,15 @@ class MAP:
         self.mdict.update({name: round(getattr(self.mdata, name),1) for name, dtype in self.mdata._fields_})
         print "self.mdict=", self.mdict 
 
-
-        with self.connection.cursor() as cursor:
-            placeholders = ', '.join(['%s'] * len(self.mdict))
-            columns = ', '.join(self.mdict.keys())
-            sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % ('data', columns, placeholders)
-            cursor.execute(sql, self.mdict.values())
-            #print "columns=", columns
-            #print "values=", self.mdict.values()
-            # print "sql=", sql, self.mdict.values()
-        self.connection.commit()
+        try:
+            with self.connection.cursor() as cursor:
+                placeholders = ', '.join(['%s'] * len(self.mdict))
+                columns = ', '.join(self.mdict.keys())
+                sql = "INSERT INTO %s ( %s ) VALUES ( %s )" % ('data', columns, placeholders)
+                cursor.execute(sql, self.mdict.values())
+            self.connection.commit()
+        except Exception as ex:
+            print "MySQL exception: ", str(ex)
 
 if __name__ == '__main__':
     mapups = MAP('/dev/ttyUSB0', baudrate=19200, timeout=5)
@@ -265,9 +266,6 @@ if __name__ == '__main__':
 
     if mapups.read_data():
         print "mapups.mdata=", repr(mapups.mdata)
-        print "type(_fields_)=", type(mapups.mdata._fields_)
-        print "type(_fields_[0])=", type(mapups.mdata._fields_[0])
-        print "len(_fields_)=", len(mapups.mdata._fields_)
         mapups.save_data_to_db()
     else:    
         print "Error read_data()"
