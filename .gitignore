@@ -1,0 +1,7 @@
+buf1
+nohup.out
+*.bin
+*.csv
+*.pyc
+*.c
+test*
